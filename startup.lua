@@ -1,43 +1,44 @@
-local decoder      = require("cc.audio.dfpwm").make_decoder()
+local decoder        = require("cc.audio.dfpwm").make_decoder()
 
 -- === CONFIGURATION ===
-local serverIP     = "cc-void-city-radio-piueq.ondigitalocean.app"
-local wsUrl        = "wss://" .. serverIP .. "/ws"
-local MAX_VOLUME   = 3.0
-local SLIDER_WIDTH = 20
-local VOLUME_STEP  = MAX_VOLUME / SLIDER_WIDTH
-local volume       = MAX_VOLUME
+local serverIP       = "cc-void-city-radio-piueq.ondigitalocean.app"
+local wsUrl          = "wss://" .. serverIP .. "/ws"
+local MAX_VOLUME     = 3.0
+local SLIDER_WIDTH   = 20
+local VOLUME_STEP    = MAX_VOLUME / SLIDER_WIDTH
+local volume         = MAX_VOLUME
 
 -- === AUTO-UPDATE VIA GITHUB RELEASES ===
-local VERSION      = "1.0.1"
-local GITHUB_OWNER = "Coop25"       -- ← change from "<USER>"
-local GITHUB_REPO  = "cc-Radio-Lua" -- ← change from "<REPO>"
-local RELEASE_API  = string.format(
+local VERSION        = "1.0.0"
+local GITHUB_OWNER   = "Coop25"
+local GITHUB_REPO    = "cc-Radio-Lua"
+local RELEASE_API    = string.format(
     "https://api.github.com/repos/%s/%s/releases/latest",
+    GITHUB_OWNER, GITHUB_REPO
+)
+-- raw master path for direct script fetch
+local RAW_MASTER_URL = string.format(
+    "https://raw.githubusercontent.com/%s/%s/main/startup.lua",
     GITHUB_OWNER, GITHUB_REPO
 )
 
 local function tryGitHubUpdate()
     if not http or not fs or not textutils then return end
-    local resp = http.get(RELEASE_API)
+    local headers = { ["User-Agent"] = "cc-Radio-Lua" }
+    -- get latest release tag
+    local resp = http.get(RELEASE_API, headers)
     if not resp then return end
     local data = textutils.unserializeJSON(resp.readAll())
     resp.close()
-    -- strip leading 'v' from tag if present
+    -- normalize tag (strip leading 'v')
     local remoteTag = data.tag_name or ""
     local normTag = remoteTag:gsub("^v", "")
     if normTag == VERSION then return end
-    local downloadUrl
-    for _, asset in ipairs(data.assets) do
-        if asset.name == "startup.lua" then
-            downloadUrl = asset.browser_download_url
-            break
-        end
-    end
-    if not downloadUrl then return end
-    local scriptResp = http.get(downloadUrl)
+    -- fetch latest script from master
+    local scriptResp = http.get(RAW_MASTER_URL, headers)
     if not scriptResp then return end
     local code = scriptResp.readAll(); scriptResp.close()
+    -- overwrite and restart
     local prog = shell.getRunningProgram()
     local f = fs.open(prog, "w")
     f.write(code); f.close()
