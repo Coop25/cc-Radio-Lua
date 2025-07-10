@@ -9,7 +9,7 @@ local VOLUME_STEP  = MAX_VOLUME / SLIDER_WIDTH
 local volume       = MAX_VOLUME
 
 -- === AUTO-UPDATE VIA GITHUB RELEASES ===
-local VERSION      = "1.0.0"
+local VERSION      = "1.0.1"
 local GITHUB_OWNER = "Coop25"       -- ← change from "<USER>"
 local GITHUB_REPO  = "cc-Radio-Lua" -- ← change from "<REPO>"
 local RELEASE_API  = string.format(
