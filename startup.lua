@@ -16,21 +16,17 @@ local RELEASE_API  = string.format(
     "https://api.github.com/repos/%s/%s/releases/latest",
     GITHUB_OWNER, GITHUB_REPO
 )
-local RAW_BASE     = string.format(
-    "https://raw.githubusercontent.com/%s/%s/main/",
-    GITHUB_OWNER, GITHUB_REPO
-)
 
 local function tryGitHubUpdate()
     if not http or not fs or not textutils then return end
-    -- fetch latest release metadata
     local resp = http.get(RELEASE_API)
     if not resp then return end
     local data = textutils.unserializeJSON(resp.readAll())
     resp.close()
-    local remoteTag = data.tag_name
-    if not remoteTag or remoteTag == VERSION then return end
-    -- find asset named "computercraft_radio.lua" in release assets
+    -- strip leading 'v' from tag if present
+    local remoteTag = data.tag_name or ""
+    local normTag = remoteTag:gsub("^v", "")
+    if normTag == VERSION then return end
     local downloadUrl
     for _, asset in ipairs(data.assets) do
         if asset.name == "startup.lua" then
@@ -39,16 +35,12 @@ local function tryGitHubUpdate()
         end
     end
     if not downloadUrl then return end
-    -- download and overwrite
     local scriptResp = http.get(downloadUrl)
     if not scriptResp then return end
-    local code = scriptResp.readAll()
-    scriptResp.close()
+    local code = scriptResp.readAll(); scriptResp.close()
     local prog = shell.getRunningProgram()
     local f = fs.open(prog, "w")
-    f.write(code)
-    f.close()
-    -- restart
+    f.write(code); f.close()
     shell.run(prog)
 end
 
