@@ -223,6 +223,16 @@
       };
     }
 
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        // if ws is gone or closed, restart
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          updateStatus('Restoring connection…');
+          setupWebSocket();
+        }
+      }
+    });
+
     connectBtn.onclick = startStreaming;
     disconnectBtn.onclick = stopStreaming;
     playpauseBtn.onclick = togglePlayPause;
