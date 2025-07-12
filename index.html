@@ -5,25 +5,59 @@
   <meta charset="utf-8">
   <title>DFPWM Stream Player</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#000000">
+  <!-- PWA manifest and service worker if needed -->
   <style>
+    /* Dark theme variables */
+    :root {
+      --bg-color: #121212;
+      --fg-color: #e0e0e0;
+      --btn-bg: #333333;
+      --btn-fg: #e0e0e0;
+      --slider-bg: #444444;
+      --slider-thumb: #888888;
+    }
+
     body {
+      background-color: var(--bg-color);
+      color: var(--fg-color);
       font-family: sans-serif;
       padding: 1rem;
     }
 
-    button,
-    input[type="range"] {
+    button {
+      background-color: var(--btn-bg);
+      color: var(--btn-fg);
+      border: none;
+      border-radius: 4px;
       font-size: 1rem;
+      padding: 0.5rem 1rem;
       margin: 0.5rem 0;
+      cursor: pointer;
     }
 
-    #status {
-      margin: 1rem 0;
+    button:disabled {
+      opacity: 0.5;
+      cursor: default;
     }
 
     label {
       display: block;
       margin-top: 1rem;
+      color: var(--fg-color);
+    }
+
+    input[type="range"] {
+      width: 100%;
+      background-color: var(--slider-bg);
+      accent-color: var(--slider-thumb);
+      margin-top: 0.5rem;
+    }
+
+    #status {
+      margin: 1rem 0;
+      color: var(--fg-color);
     }
   </style>
 </head>
@@ -41,7 +75,9 @@
 
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('service-worker.js');
+      navigator.serviceWorker.register('/service-worker.js')
+        .then(() => console.log('SW registered'))
+        .catch(err => console.error('SW failed', err));
     }
     class DFPWMDecoder {
       constructor() {
