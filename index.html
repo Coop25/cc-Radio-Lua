@@ -54,6 +54,7 @@
     audio {
       width: 100%;
       margin-top: 1rem;
+      display: none;
     }
   </style>
 </head>
@@ -76,8 +77,9 @@
         .catch(console.error);
     }
 
-    // Setup MediaSession
+    // Global MediaSession setup
     if ('mediaSession' in navigator) {
+      const player = document.getElementById('player');
       navigator.mediaSession.metadata = new MediaMetadata({
         title: 'Void City Radio',
         artist: 'Live Stream',
@@ -87,6 +89,9 @@
           { src: 'icon-512.png', sizes: '512x512', type: 'image/png' }
         ]
       });
+      navigator.mediaSession.setActionHandler('play', () => player.play());
+      navigator.mediaSession.setActionHandler('pause', () => player.pause());
+      // You can add more handlers here as needed
     }
 
     class DFPWMDecoder {
@@ -128,6 +133,7 @@
     volumeNode.connect(audioCtx.destination);
 
     let ws = null;
+    let dest = null;
     let nextPlayTime = 0;
     let isPlaying = true;
     const SAMPLE_RATE = 48000;
@@ -147,21 +153,11 @@
     async function startStreaming() {
       await audioCtx.resume();
       // Setup hidden audio for background playback
-      const dest = audioCtx.createMediaStreamDestination();
+      dest = audioCtx.createMediaStreamDestination();
       volumeNode.disconnect();
       volumeNode.connect(dest);
       audioEl.srcObject = dest.stream;
-      audioEl.play().catch(console.warn);
-
-      // MediaSession action handlers
-      if ('mediaSession' in navigator) {
-        navigator.mediaSession.setActionHandler('play', () => {
-          audioCtx.resume(); audioEl.play();
-        });
-        navigator.mediaSession.setActionHandler('pause', () => {
-          audioCtx.suspend(); audioEl.pause();
-        });
-      }
+      await audioEl.play().catch(console.warn);
 
       connectBtn.disabled = true;
       disconnectBtn.disabled = false;
@@ -169,11 +165,11 @@
       playpauseBtn.textContent = 'Pause';
       updateStatus('Connecting…');
       nextPlayTime = audioCtx.currentTime + CHUNK_DURATION;
-      setupWebSocket(dest);
+      setupWebSocket();
     }
 
     function stopStreaming() {
-      if(ws) { ws.close(); ws = null; }
+      if (ws) { ws.close(); ws = null; }
       volumeNode.disconnect();
       volumeNode.connect(audioCtx.destination);
       audioEl.pause();
@@ -193,7 +189,7 @@
         updateStatus('Paused');
       } else {
         audioCtx.resume();
-        audioEl.play();
+        audioEl.play().catch(console.warn);
         playpauseBtn.textContent = 'Pause';
         isPlaying = true;
         updateStatus('Resumed');
@@ -204,7 +200,7 @@
       volumeNode.gain.value = parseFloat(volumeSlider.value);
     };
 
-    function setupWebSocket(dest) {
+    function setupWebSocket() {
       ws = new WebSocket('wss://cc-void-city-radio-piueq.ondigitalocean.app/ws');
       ws.binaryType = 'arraybuffer';
       ws.onopen = () => updateStatus('Connected, streaming…');
@@ -216,7 +212,7 @@
         const src = audioCtx.createBufferSource();
         src.buffer = buffer;
         src.connect(volumeNode);
-        if(nextPlayTime < audioCtx.currentTime) {
+        if (nextPlayTime < audioCtx.currentTime) {
           nextPlayTime = audioCtx.currentTime + 0.01;
         }
         src.start(nextPlayTime);
@@ -226,7 +222,7 @@
       ws.onclose = () => {
         if (!disconnectBtn.disabled) {
           updateStatus('Connection lost, reconnecting…');
-          setTimeout(() => setupWebSocket(dest), 1000);
+          setTimeout(setupWebSocket, 1000);
         }
       };
     }
