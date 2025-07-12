@@ -5,9 +5,9 @@
   <meta charset="utf-8">
   <title>DFPWM Stream Player</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="manifest" href="manifest.json">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#000000">
-  <!-- PWA manifest and service worker if needed -->
+  <link rel="manifest" href="manifest.json">
   <style>
     /* Dark theme variables */
     :root {
@@ -59,11 +59,15 @@
       margin: 1rem 0;
       color: var(--fg-color);
     }
+
+    audio {
+      display: none;
+    }
   </style>
 </head>
 
 <body>
-  <h1>DFPWM Stream Player</h1>
+  <h1>Void City Radio Player</h1>
   <button id="connect">Connect</button>
   <button id="disconnect" disabled>Disconnect</button>
   <button id="playpause" disabled>Pause</button>
@@ -72,13 +76,15 @@
     <input type="range" id="volume" min="0" max="1" step="0.01" value="1">
   </label>
   <div id="status">Status: Idle</div>
+  <audio id="player" controls playsinline></audio>
 
   <script>
+    // Register service worker
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('service-worker.js')
-        .then(() => console.log('SW registered'))
-        .catch(err => console.error('SW failed', err));
+        .catch(console.error);
     }
+
     class DFPWMDecoder {
       constructor() {
         this.PREC = 10; this.POSTFILT = 140;
@@ -114,6 +120,8 @@
     const audioCtx = new AudioContext();
     const decoder = new DFPWMDecoder();
     const volumeNode = audioCtx.createGain();
+    let dest = null;
+
     volumeNode.gain.value = 1;
     volumeNode.connect(audioCtx.destination);
 
@@ -128,6 +136,7 @@
     const disconnectBtn = document.getElementById('disconnect');
     const playpauseBtn = document.getElementById('playpause');
     const volumeSlider = document.getElementById('volume');
+    const audioEl = document.getElementById('player');
 
     function updateStatus(msg) {
       statusEl.textContent = 'Status: ' + msg;
@@ -135,6 +144,13 @@
 
     async function startStreaming() {
       await audioCtx.resume();
+      // Setup hidden audio for background playback
+      dest = audioCtx.createMediaStreamDestination();
+      volumeNode.disconnect();
+      volumeNode.connect(dest);
+      audioEl.srcObject = dest.stream;
+      audioEl.play().catch(console.warn);
+
       connectBtn.disabled = true;
       disconnectBtn.disabled = false;
       playpauseBtn.disabled = false;
@@ -149,6 +165,10 @@
         ws.close();
         ws = null;
       }
+      volumeNode.disconnect();
+      volumeNode.connect(audioCtx.destination);
+      audioEl.pause();
+      audioEl.srcObject = null;
       connectBtn.disabled = false;
       disconnectBtn.disabled = true;
       playpauseBtn.disabled = true;
@@ -158,11 +178,13 @@
     function togglePlayPause() {
       if (isPlaying) {
         audioCtx.suspend();
+        audioEl.pause();
         playpauseBtn.textContent = 'Play';
         isPlaying = false;
         updateStatus('Paused');
       } else {
         audioCtx.resume();
+        audioEl.play().catch(console.warn);
         playpauseBtn.textContent = 'Pause';
         isPlaying = true;
         updateStatus('Resumed');
