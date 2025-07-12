@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="utf-8">
-  <title>DFPWM 100 ms Chunk Player</title>
+  <title>DFPWM WebSocket Audio Player</title>
   <style>
     body {
       font-family: sans-serif;
@@ -22,18 +22,21 @@
 </head>
 
 <body>
-  <h1>DFPWM Stream Player (100 ms Chunks)</h1>
+  <h1>DFPWM Stream Player (100 ms Chunks, 48 kHz)</h1>
   <button id="start">Start Audio</button>
   <div id="status">Status: Not connected</div>
 
   <script>
-    // ——— DFPWM Decoder (same as before) ———
     class DFPWMDecoder {
       constructor() {
         this.PREC = 10;
         this.POSTFILT = 140;
-        this.fq = 0; this.q = 0; this.s = 0; this.lt = -128;
+        this.fq = 0;
+        this.q = 0;
+        this.s = 0;
+        this.lt = -128;
       }
+
       decode(data) {
         const { PREC, POSTFILT } = this;
         const out = new Float32Array(data.length * 8);
@@ -41,15 +44,24 @@
         for (let i = 0; i < data.length; i++) {
           let d = data[i];
           for (let b = 0; b < 8; b++, op++) {
-            const t = (d & 1) ? 127 : -128; d >>= 1;
+            const t = (d & 1) ? 127 : -128;
+            d >>= 1;
+
+            // Charge update
             const oldQ = this.q;
             let nq = this.q + (((this.s * (t - this.q)) + (1 << (PREC - 1))) >> PREC);
             if (nq === this.q && nq !== t) nq += (t === 127 ? 1 : -1);
             this.q = nq;
+
+            // Strength update
             const st = (t !== this.lt ? 0 : (1 << PREC) - 1);
             if (this.s !== st) this.s += (st ? 1 : -1);
             if (this.s < (1 << (PREC - 7))) this.s = (1 << (PREC - 7));
+
+            // Anti-jerk
             let ov = (t !== this.lt ? ((nq + oldQ + 1) >> 1) : nq);
+
+            // Low-pass filter
             this.fq += ((POSTFILT * (ov - this.fq) + 0x80) >> 8);
             out[op] = this.fq / 128;
             this.lt = t;
@@ -59,17 +71,13 @@
       }
     }
 
-    // ——— Web Audio setup ———
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     const audioCtx = new AudioContext();
     const decoder = new DFPWMDecoder();
-
-    // We'll keep a moving "play head" in audioCtx time
     let nextPlayTime = 0;
-    const chunkDuration = 0.1;  // 100 ms
 
     document.getElementById('start').onclick = async () => {
-      await audioCtx.resume();  // unlock AudioContext
+      await audioCtx.resume();
       const status = document.getElementById('status');
       status.textContent = 'Status: Connecting…';
 
@@ -78,11 +86,10 @@
 
       ws.onopen = () => {
         status.textContent = 'Status: Connected, streaming…';
-        // initialize nextPlayTime
         nextPlayTime = audioCtx.currentTime + 0.1;
       };
-      ws.onerror = e => {
-        console.error(e);
+      ws.onerror = err => {
+        console.error('WebSocket error', err);
         status.textContent = 'Status: WebSocket error';
       };
       ws.onclose = () => {
@@ -93,26 +100,20 @@
         const compressed = new Uint8Array(evt.data);
         const pcm = decoder.decode(compressed);
 
-        // create a buffer exactly as long as our 100 ms chunk
-        const buffer = audioCtx.createBuffer(
-          1,
-          pcm.length,
-          audioCtx.sampleRate
-        );
+        // Tell the Web Audio API these samples are at 48 kHz
+        const buffer = audioCtx.createBuffer(1, pcm.length, 48000);
         buffer.copyToChannel(pcm, 0);
 
-        // make a source and schedule it
         const src = audioCtx.createBufferSource();
         src.buffer = buffer;
         src.connect(audioCtx.destination);
 
-        // if we're behind, catch up
         if (nextPlayTime < audioCtx.currentTime) {
           nextPlayTime = audioCtx.currentTime + 0.01;
         }
 
         src.start(nextPlayTime);
-        nextPlayTime += buffer.duration;  // buffer.duration ≈ 0.1
+        nextPlayTime += buffer.duration;
       };
     };
   </script>
