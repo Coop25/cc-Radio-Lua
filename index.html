@@ -1,32 +1,52 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="utf-8">
-  <title>DFPWM Stream Player (Auto-Reconnect + Stop)</title>
+  <title>DFPWM Stream Player</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    body { font-family: sans-serif; padding: 1rem; }
-    button { font-size: 1rem; padding: 0.5rem 1rem; margin: 0.3rem; }
-    #status { margin: 1rem 0; }
-    audio { display: none; }
+    body {
+      font-family: sans-serif;
+      padding: 1rem;
+    }
+
+    button,
+    input[type="range"] {
+      font-size: 1rem;
+      margin: 0.5rem 0;
+    }
+
+    #status {
+      margin: 1rem 0;
+    }
+
+    label {
+      display: block;
+      margin-top: 1rem;
+    }
   </style>
 </head>
+
 <body>
   <h1>DFPWM Stream Player</h1>
-  <button id="start">Start Audio</button>
-  <button id="stop" disabled>Stop Audio</button>
+  <button id="connect">Connect</button>
+  <button id="disconnect" disabled>Disconnect</button>
+  <button id="playpause" disabled>Pause</button>
+  <label>
+    Volume:
+    <input type="range" id="volume" min="0" max="1" step="0.01" value="1">
+  </label>
   <div id="status">Status: Idle</div>
-  <audio id="player" controls playsinline></audio>
 
   <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('service-worker.js');
+    }
     class DFPWMDecoder {
       constructor() {
-        this.PREC = 10;
-        this.POSTFILT = 140;
-        this.fq = 0;
-        this.q  = 0;
-        this.s  = 0;
-        this.lt = -128;
+        this.PREC = 10; this.POSTFILT = 140;
+        this.fq = 0; this.q = 0; this.s = 0; this.lt = -128;
       }
       decode(data) {
         const { PREC, POSTFILT } = this;
@@ -57,75 +77,98 @@
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     const audioCtx = new AudioContext();
     const decoder = new DFPWMDecoder();
-    const audioEl = document.getElementById('player');
+    const volumeNode = audioCtx.createGain();
+    volumeNode.gain.value = 1;
+    volumeNode.connect(audioCtx.destination);
+
     let ws = null;
     let nextPlayTime = 0;
-    let shouldReconnect = false;
-    let reconnectDelay = 1000;
+    let isPlaying = true;
+    const SAMPLE_RATE = 48000;
+    const CHUNK_DURATION = 0.1; // seconds
+
+    const statusEl = document.getElementById('status');
+    const connectBtn = document.getElementById('connect');
+    const disconnectBtn = document.getElementById('disconnect');
+    const playpauseBtn = document.getElementById('playpause');
+    const volumeSlider = document.getElementById('volume');
 
     function updateStatus(msg) {
-      document.getElementById('status').textContent = 'Status: ' + msg;
+      statusEl.textContent = 'Status: ' + msg;
     }
 
     async function startStreaming() {
       await audioCtx.resume();
-      shouldReconnect = true;
-      reconnectDelay = 1000;
-      document.getElementById('start').disabled = true;
-      document.getElementById('stop').disabled = false;
-      // connect audio to player
-      const dest = audioCtx.createMediaStreamDestination();
-      audioEl.srcObject = dest.stream;
-      audioEl.play().catch(()=>{});
-      connect(dest);
+      connectBtn.disabled = true;
+      disconnectBtn.disabled = false;
+      playpauseBtn.disabled = false;
+      playpauseBtn.textContent = 'Pause';
+      updateStatus('Connecting…');
+      nextPlayTime = audioCtx.currentTime + CHUNK_DURATION;
+      setupWebSocket();
     }
 
     function stopStreaming() {
-      shouldReconnect = false;
-      if (ws) ws.close();
-      document.getElementById('start').disabled = false;
-      document.getElementById('stop').disabled = true;
-      updateStatus('Stopped');
+      if (ws) {
+        ws.close();
+        ws = null;
+      }
+      connectBtn.disabled = false;
+      disconnectBtn.disabled = true;
+      playpauseBtn.disabled = true;
+      updateStatus('Disconnected');
     }
 
-    function connect(dest) {
-      updateStatus('Connecting…');
+    function togglePlayPause() {
+      if (isPlaying) {
+        audioCtx.suspend();
+        playpauseBtn.textContent = 'Play';
+        isPlaying = false;
+        updateStatus('Paused');
+      } else {
+        audioCtx.resume();
+        playpauseBtn.textContent = 'Pause';
+        isPlaying = true;
+        updateStatus('Resumed');
+      }
+    }
+
+    volumeSlider.oninput = () => {
+      volumeNode.gain.value = parseFloat(volumeSlider.value);
+    };
+
+    function setupWebSocket() {
       ws = new WebSocket('wss://cc-void-city-radio-piueq.ondigitalocean.app/ws');
       ws.binaryType = 'arraybuffer';
 
-      ws.onopen = () => {
-        updateStatus('Connected, streaming…');
-        nextPlayTime = audioCtx.currentTime + 0.1;
-      };
+      ws.onopen = () => updateStatus('Connected, streaming…');
       ws.onmessage = evt => {
         const compressed = new Uint8Array(evt.data);
         const pcm = decoder.decode(compressed);
-        const buffer = audioCtx.createBuffer(1, pcm.length, 48000);
+        const buffer = audioCtx.createBuffer(1, pcm.length, SAMPLE_RATE);
         buffer.copyToChannel(pcm, 0);
         const src = audioCtx.createBufferSource();
         src.buffer = buffer;
-        src.connect(dest);
+        src.connect(volumeNode);
         if (nextPlayTime < audioCtx.currentTime) {
           nextPlayTime = audioCtx.currentTime + 0.01;
         }
         src.start(nextPlayTime);
         nextPlayTime += buffer.duration;
       };
-      ws.onerror = () => {
-        ws.close();
-      };
+      ws.onerror = () => ws.close();
       ws.onclose = () => {
-        if (!shouldReconnect) return;
-        updateStatus('Disconnected, retrying in ' + (reconnectDelay/1000) + 's…');
-        setTimeout(() => {
-          reconnectDelay = Math.min(reconnectDelay * 2, 30000);
-          connect(dest);
-        }, reconnectDelay);
+        if (!disconnectBtn.disabled) {
+          updateStatus('Connection lost, reconnecting…');
+          setTimeout(setupWebSocket, 1000);
+        }
       };
     }
 
-    document.getElementById('start').onclick = startStreaming;
-    document.getElementById('stop').onclick = stopStreaming;
+    connectBtn.onclick = startStreaming;
+    disconnectBtn.onclick = stopStreaming;
+    playpauseBtn.onclick = togglePlayPause;
   </script>
 </body>
+
 </html>
