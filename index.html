@@ -2,19 +2,20 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>DFPWM Stream Player (Background Mobile)</title>
+  <title>DFPWM Stream Player (Android Background)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    body { font-family: sans-serif; padding: 2rem; }
-    button { font-size: 1rem; padding: 0.5rem 1rem; }
-    #status { margin-top: 1rem; }
-    audio { display: none; }
+    body { font-family: sans-serif; padding: 1rem; }
+    button { font-size: 1rem; padding: 0.5rem 1rem; margin-bottom: 1rem; }
+    #status { margin-bottom: 1rem; }
+    audio { width: 100%; /* show full-size controls */ }
   </style>
 </head>
 <body>
-  <h1>DFPWM Stream Player (Background Mobile)</h1>
+  <h1>DFPWM Stream Player (Android Background)</h1>
   <button id="start">Start Audio</button>
   <div id="status">Status: Not connected</div>
-  <audio id="player" autoplay></audio>
+  <audio id="player" controls playsinline></audio>
 
   <script>
     class DFPWMDecoder {
@@ -62,14 +63,12 @@
       const status = document.getElementById('status');
       status.textContent = 'Status: Connecting…';
 
-      // MediaStreamDestination for background playback
+      // use MediaStreamDestination
       const dest = audioCtx.createMediaStreamDestination();
-
-      // Create hidden audio element for mobile background play
       const audioEl = document.getElementById('player');
       audioEl.srcObject = dest.stream;
 
-      // Register MediaSession controls
+      // media session for controls
       if ('mediaSession' in navigator) {
         navigator.mediaSession.metadata = new MediaMetadata({
           title: 'DFPWM Stream',
@@ -85,7 +84,7 @@
       ws.onopen = () => {
         status.textContent = 'Status: Connected, streaming…';
         nextPlayTime = audioCtx.currentTime + 0.1;
-        audioEl.play();
+        audioEl.play().catch(e => console.warn(e));
       };
       ws.onerror = err => {
         console.error('WebSocket error', err);
@@ -97,8 +96,8 @@
 
       ws.onmessage = evt => {
         const compressed = new Uint8Array(evt.data);
-        const pcm        = decoder.decode(compressed);
-        const buffer     = audioCtx.createBuffer(1, pcm.length, 48000);
+        const pcm = decoder.decode(compressed);
+        const buffer = audioCtx.createBuffer(1, pcm.length, 48000);
         buffer.copyToChannel(pcm, 0);
 
         const src = audioCtx.createBufferSource();
