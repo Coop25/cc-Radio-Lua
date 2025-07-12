@@ -1,15 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="utf-8">
-  <title>DFPWM Stream Player</title>
+  <title>Void City Radio</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#000000">
   <link rel="manifest" href="manifest.json">
   <style>
-    /* Dark theme variables */
     :root {
       --bg-color: #121212;
       --fg-color: #e0e0e0;
@@ -18,14 +16,12 @@
       --slider-bg: #444444;
       --slider-thumb: #888888;
     }
-
     body {
       background-color: var(--bg-color);
       color: var(--fg-color);
       font-family: sans-serif;
       padding: 1rem;
     }
-
     button {
       background-color: var(--btn-bg);
       color: var(--btn-fg);
@@ -36,38 +32,33 @@
       margin: 0.5rem 0;
       cursor: pointer;
     }
-
     button:disabled {
       opacity: 0.5;
       cursor: default;
     }
-
     label {
       display: block;
       margin-top: 1rem;
       color: var(--fg-color);
     }
-
     input[type="range"] {
       width: 100%;
       background-color: var(--slider-bg);
       accent-color: var(--slider-thumb);
       margin-top: 0.5rem;
     }
-
     #status {
       margin: 1rem 0;
       color: var(--fg-color);
     }
-
     audio {
-      display: none;
+      width: 100%;
+      margin-top: 1rem;
     }
   </style>
 </head>
-
 <body>
-  <h1>Void City Radio Player</h1>
+  <h1>Void City Radio</h1>
   <button id="connect">Connect</button>
   <button id="disconnect" disabled>Disconnect</button>
   <button id="playpause" disabled>Pause</button>
@@ -76,13 +67,26 @@
     <input type="range" id="volume" min="0" max="1" step="0.01" value="1">
   </label>
   <div id="status">Status: Idle</div>
-  <audio id="player" controls playsinline></audio>
+  <audio id="player" controls playsinline controlsList="nodownload"></audio>
 
   <script>
     // Register service worker
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('service-worker.js')
         .catch(console.error);
+    }
+
+    // Setup MediaSession
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: 'Void City Radio',
+        artist: 'Live Stream',
+        album: '',
+        artwork: [
+          { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
+          { src: 'icon-512.png', sizes: '512x512', type: 'image/png' }
+        ]
+      });
     }
 
     class DFPWMDecoder {
@@ -120,8 +124,6 @@
     const audioCtx = new AudioContext();
     const decoder = new DFPWMDecoder();
     const volumeNode = audioCtx.createGain();
-    let dest = null;
-
     volumeNode.gain.value = 1;
     volumeNode.connect(audioCtx.destination);
 
@@ -129,7 +131,7 @@
     let nextPlayTime = 0;
     let isPlaying = true;
     const SAMPLE_RATE = 48000;
-    const CHUNK_DURATION = 0.1; // seconds
+    const CHUNK_DURATION = 0.1;
 
     const statusEl = document.getElementById('status');
     const connectBtn = document.getElementById('connect');
@@ -145,11 +147,21 @@
     async function startStreaming() {
       await audioCtx.resume();
       // Setup hidden audio for background playback
-      dest = audioCtx.createMediaStreamDestination();
+      const dest = audioCtx.createMediaStreamDestination();
       volumeNode.disconnect();
       volumeNode.connect(dest);
       audioEl.srcObject = dest.stream;
       audioEl.play().catch(console.warn);
+
+      // MediaSession action handlers
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.setActionHandler('play', () => {
+          audioCtx.resume(); audioEl.play();
+        });
+        navigator.mediaSession.setActionHandler('pause', () => {
+          audioCtx.suspend(); audioEl.pause();
+        });
+      }
 
       connectBtn.disabled = true;
       disconnectBtn.disabled = false;
@@ -157,14 +169,11 @@
       playpauseBtn.textContent = 'Pause';
       updateStatus('Connecting…');
       nextPlayTime = audioCtx.currentTime + CHUNK_DURATION;
-      setupWebSocket();
+      setupWebSocket(dest);
     }
 
     function stopStreaming() {
-      if (ws) {
-        ws.close();
-        ws = null;
-      }
+      if(ws) { ws.close(); ws = null; }
       volumeNode.disconnect();
       volumeNode.connect(audioCtx.destination);
       audioEl.pause();
@@ -184,7 +193,7 @@
         updateStatus('Paused');
       } else {
         audioCtx.resume();
-        audioEl.play().catch(console.warn);
+        audioEl.play();
         playpauseBtn.textContent = 'Pause';
         isPlaying = true;
         updateStatus('Resumed');
@@ -195,10 +204,9 @@
       volumeNode.gain.value = parseFloat(volumeSlider.value);
     };
 
-    function setupWebSocket() {
+    function setupWebSocket(dest) {
       ws = new WebSocket('wss://cc-void-city-radio-piueq.ondigitalocean.app/ws');
       ws.binaryType = 'arraybuffer';
-
       ws.onopen = () => updateStatus('Connected, streaming…');
       ws.onmessage = evt => {
         const compressed = new Uint8Array(evt.data);
@@ -208,7 +216,7 @@
         const src = audioCtx.createBufferSource();
         src.buffer = buffer;
         src.connect(volumeNode);
-        if (nextPlayTime < audioCtx.currentTime) {
+        if(nextPlayTime < audioCtx.currentTime) {
           nextPlayTime = audioCtx.currentTime + 0.01;
         }
         src.start(nextPlayTime);
@@ -218,25 +226,14 @@
       ws.onclose = () => {
         if (!disconnectBtn.disabled) {
           updateStatus('Connection lost, reconnecting…');
-          setTimeout(setupWebSocket, 1000);
+          setTimeout(() => setupWebSocket(dest), 1000);
         }
       };
     }
-
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') {
-        // if ws is gone or closed, restart
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-          updateStatus('Restoring connection…');
-          setupWebSocket();
-        }
-      }
-    });
 
     connectBtn.onclick = startStreaming;
     disconnectBtn.onclick = stopStreaming;
     playpauseBtn.onclick = togglePlayPause;
   </script>
 </body>
-
 </html>
