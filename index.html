@@ -2,19 +2,20 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>DFPWM Stream Player (Android Background)</title>
+  <title>DFPWM Stream Player (Auto-Reconnect + Stop)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     body { font-family: sans-serif; padding: 1rem; }
-    button { font-size: 1rem; padding: 0.5rem 1rem; margin-bottom: 1rem; }
-    #status { margin-bottom: 1rem; }
-    audio { width: 100%; /* show full-size controls */ }
+    button { font-size: 1rem; padding: 0.5rem 1rem; margin: 0.3rem; }
+    #status { margin: 1rem 0; }
+    audio { display: none; }
   </style>
 </head>
 <body>
-  <h1>DFPWM Stream Player (Android Background)</h1>
+  <h1>DFPWM Stream Player</h1>
   <button id="start">Start Audio</button>
-  <div id="status">Status: Not connected</div>
+  <button id="stop" disabled>Stop Audio</button>
+  <div id="status">Status: Idle</div>
   <audio id="player" controls playsinline></audio>
 
   <script>
@@ -56,61 +57,75 @@
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     const audioCtx = new AudioContext();
     const decoder = new DFPWMDecoder();
+    const audioEl = document.getElementById('player');
+    let ws = null;
     let nextPlayTime = 0;
+    let shouldReconnect = false;
+    let reconnectDelay = 1000;
 
-    document.getElementById('start').onclick = async () => {
+    function updateStatus(msg) {
+      document.getElementById('status').textContent = 'Status: ' + msg;
+    }
+
+    async function startStreaming() {
       await audioCtx.resume();
-      const status = document.getElementById('status');
-      status.textContent = 'Status: Connecting…';
-
-      // use MediaStreamDestination
+      shouldReconnect = true;
+      reconnectDelay = 1000;
+      document.getElementById('start').disabled = true;
+      document.getElementById('stop').disabled = false;
+      // connect audio to player
       const dest = audioCtx.createMediaStreamDestination();
-      const audioEl = document.getElementById('player');
       audioEl.srcObject = dest.stream;
+      audioEl.play().catch(()=>{});
+      connect(dest);
+    }
 
-      // media session for controls
-      if ('mediaSession' in navigator) {
-        navigator.mediaSession.metadata = new MediaMetadata({
-          title: 'DFPWM Stream',
-          artist: 'Live Stream',
-        });
-        navigator.mediaSession.setActionHandler('play', () => audioEl.play());
-        navigator.mediaSession.setActionHandler('pause', () => audioEl.pause());
-      }
+    function stopStreaming() {
+      shouldReconnect = false;
+      if (ws) ws.close();
+      document.getElementById('start').disabled = false;
+      document.getElementById('stop').disabled = true;
+      updateStatus('Stopped');
+    }
 
-      const ws = new WebSocket('wss://cc-void-city-radio-piueq.ondigitalocean.app/ws');
+    function connect(dest) {
+      updateStatus('Connecting…');
+      ws = new WebSocket('wss://cc-void-city-radio-piueq.ondigitalocean.app/ws');
       ws.binaryType = 'arraybuffer';
 
       ws.onopen = () => {
-        status.textContent = 'Status: Connected, streaming…';
+        updateStatus('Connected, streaming…');
         nextPlayTime = audioCtx.currentTime + 0.1;
-        audioEl.play().catch(e => console.warn(e));
       };
-      ws.onerror = err => {
-        console.error('WebSocket error', err);
-        status.textContent = 'Status: WebSocket error';
-      };
-      ws.onclose = () => {
-        status.textContent = 'Status: Connection closed';
-      };
-
       ws.onmessage = evt => {
         const compressed = new Uint8Array(evt.data);
         const pcm = decoder.decode(compressed);
         const buffer = audioCtx.createBuffer(1, pcm.length, 48000);
         buffer.copyToChannel(pcm, 0);
-
         const src = audioCtx.createBufferSource();
         src.buffer = buffer;
         src.connect(dest);
-
         if (nextPlayTime < audioCtx.currentTime) {
           nextPlayTime = audioCtx.currentTime + 0.01;
         }
         src.start(nextPlayTime);
         nextPlayTime += buffer.duration;
       };
-    };
+      ws.onerror = () => {
+        ws.close();
+      };
+      ws.onclose = () => {
+        if (!shouldReconnect) return;
+        updateStatus('Disconnected, retrying in ' + (reconnectDelay/1000) + 's…');
+        setTimeout(() => {
+          reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+          connect(dest);
+        }, reconnectDelay);
+      };
+    }
+
+    document.getElementById('start').onclick = startStreaming;
+    document.getElementById('stop').onclick = stopStreaming;
   </script>
 </body>
 </html>
