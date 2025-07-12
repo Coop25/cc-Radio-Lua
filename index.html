@@ -71,165 +71,140 @@
   <audio id="player" controls playsinline controlsList="nodownload"></audio>
 
   <script>
-    // Register service worker
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('service-worker.js')
-        .catch(console.error);
+      navigator.serviceWorker.register('service-worker.js').catch(console.error);
     }
 
-    // Global MediaSession setup
+    const audioEl = document.getElementById('player');
+
     if ('mediaSession' in navigator) {
-      const player = document.getElementById('player');
       navigator.mediaSession.metadata = new MediaMetadata({
         title: 'Void City Radio',
         artist: 'Live Stream',
-        album: '',
         artwork: [
           { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: 'icon-512.png', sizes: '512x512', type: 'image/png' }
         ]
       });
-      navigator.mediaSession.setActionHandler('play', () => player.play());
-      navigator.mediaSession.setActionHandler('pause', () => player.pause());
-      // You can add more handlers here as needed
+      navigator.mediaSession.setActionHandler('play', () => {
+        togglePlayPause(true);
+      });
+      navigator.mediaSession.setActionHandler('pause', () => {
+        togglePlayPause(false);
+      });
+      navigator.mediaSession.playbackState = 'none';
     }
 
-    class DFPWMDecoder {
-      constructor() {
-        this.PREC = 10; this.POSTFILT = 140;
-        this.fq = 0; this.q = 0; this.s = 0; this.lt = -128;
-      }
+    class DFPWMDecoder { /* same decoder as before */ 
+      constructor() {this.PREC=10;this.POSTFILT=140;this.fq=0;this.q=0;this.s=0;this.lt=-128;}
       decode(data) {
-        const { PREC, POSTFILT } = this;
-        const out = new Float32Array(data.length * 8);
-        let op = 0;
-        for (let i = 0; i < data.length; i++) {
-          let d = data[i];
-          for (let b = 0; b < 8; b++, op++) {
-            const t = (d & 1) ? 127 : -128;
-            d >>= 1;
-            const oldQ = this.q;
-            let nq = this.q + (((this.s * (t - this.q)) + (1 << (PREC - 1))) >> PREC);
-            if (nq === this.q && nq !== t) nq += (t === 127 ? 1 : -1);
-            this.q = nq;
-            const st = (t !== this.lt ? 0 : (1 << PREC) - 1);
-            if (this.s !== st) this.s += (st ? 1 : -1);
-            if (this.s < (1 << (PREC - 7))) this.s = (1 << (PREC - 7));
-            let ov = (t !== this.lt ? ((nq + oldQ + 1) >> 1) : nq);
-            this.fq += ((POSTFILT * (ov - this.fq) + 0x80) >> 8);
-            out[op] = this.fq / 128;
-            this.lt = t;
+        const {PREC,POSTFILT}=this;
+        const out=new Float32Array(data.length*8);let op=0;
+        for(let i=0;i<data.length;i++){let d=data[i];
+          for(let b=0;b<8;b++,op++){const t=(d&1)?127:-128;d>>=1;
+            const oldQ=this.q;let nq=this.q+(((this.s*(t-this.q))+(1<<(PREC-1)))>>PREC);
+            if(nq===this.q&&nq!==t)nq+=(t===127?1:-1);this.q=nq;
+            const st=(t!==this.lt?0:(1<<PREC)-1);
+            if(this.s!==st)this.s+=(st?1:-1);
+            if(this.s<(1<<(PREC-7)))this.s=(1<<(PREC-7));
+            let ov=(t!==this.lt?((nq+oldQ+1)>>1):nq);
+            this.fq+=((POSTFILT*(ov-this.fq)+0x80)>>8);
+            out[op]=this.fq/128;this.lt=t;
           }
         }
         return out;
       }
     }
 
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    const AudioContext = window.AudioContext||window.webkitAudioContext;
     const audioCtx = new AudioContext();
     const decoder = new DFPWMDecoder();
     const volumeNode = audioCtx.createGain();
-    volumeNode.gain.value = 1;
+    volumeNode.gain.value=1;
     volumeNode.connect(audioCtx.destination);
 
-    let ws = null;
-    let dest = null;
-    let nextPlayTime = 0;
-    let isPlaying = true;
-    const SAMPLE_RATE = 48000;
-    const CHUNK_DURATION = 0.1;
+    let ws=null, dest=null, nextPlayTime=0, isPlaying=true;
+    const SAMPLE_RATE=48000, CHUNK_DURATION=0.1;
 
-    const statusEl = document.getElementById('status');
-    const connectBtn = document.getElementById('connect');
-    const disconnectBtn = document.getElementById('disconnect');
-    const playpauseBtn = document.getElementById('playpause');
-    const volumeSlider = document.getElementById('volume');
-    const audioEl = document.getElementById('player');
+    const statusEl=document.getElementById('status'),
+          connectBtn=document.getElementById('connect'),
+          disconnectBtn=document.getElementById('disconnect'),
+          playpauseBtn=document.getElementById('playpause'),
+          volumeSlider=document.getElementById('volume');
 
     function updateStatus(msg) {
-      statusEl.textContent = 'Status: ' + msg;
+      statusEl.textContent='Status: '+msg;
     }
 
     async function startStreaming() {
       await audioCtx.resume();
-      // Setup hidden audio for background playback
-      dest = audioCtx.createMediaStreamDestination();
-      volumeNode.disconnect();
-      volumeNode.connect(dest);
-      audioEl.srcObject = dest.stream;
+      dest=audioCtx.createMediaStreamDestination();
+      volumeNode.disconnect();volumeNode.connect(dest);
+      audioEl.srcObject=dest.stream;
       await audioEl.play().catch(console.warn);
+      setPlaybackState('playing');
 
-      connectBtn.disabled = true;
-      disconnectBtn.disabled = false;
-      playpauseBtn.disabled = false;
-      playpauseBtn.textContent = 'Pause';
+      connectBtn.disabled=true;
+      disconnectBtn.disabled=false;
+      playpauseBtn.disabled=false;
+      playpauseBtn.textContent='Pause';
       updateStatus('Connecting…');
-      nextPlayTime = audioCtx.currentTime + CHUNK_DURATION;
+      nextPlayTime=audioCtx.currentTime+CHUNK_DURATION;
       setupWebSocket();
     }
 
     function stopStreaming() {
-      if (ws) { ws.close(); ws = null; }
-      volumeNode.disconnect();
-      volumeNode.connect(audioCtx.destination);
-      audioEl.pause();
-      audioEl.srcObject = null;
-      connectBtn.disabled = false;
-      disconnectBtn.disabled = true;
-      playpauseBtn.disabled = true;
+      if(ws){ws.close();ws=null;}
+      volumeNode.disconnect();volumeNode.connect(audioCtx.destination);
+      audioEl.pause();audioEl.srcObject=null;
+      setPlaybackState('none');
+      connectBtn.disabled=false;
+      disconnectBtn.disabled=true;
+      playpauseBtn.disabled=true;
       updateStatus('Disconnected');
     }
 
-    function togglePlayPause() {
-      if (isPlaying) {
-        audioCtx.suspend();
-        audioEl.pause();
-        playpauseBtn.textContent = 'Play';
-        isPlaying = false;
-        updateStatus('Paused');
+    function togglePlayPause(explicitState) {
+      if (explicitState===true || (explicitState===undefined && isPlaying)) {
+        audioCtx.suspend();audioEl.pause();isPlaying=false;
+        playpauseBtn.textContent='Play';updateStatus('Paused');
+        setPlaybackState('paused');
       } else {
-        audioCtx.resume();
-        audioEl.play().catch(console.warn);
-        playpauseBtn.textContent = 'Pause';
-        isPlaying = true;
-        updateStatus('Resumed');
+        audioCtx.resume();audioEl.play().catch(console.warn);isPlaying=true;
+        playpauseBtn.textContent='Pause';updateStatus('Resumed');
+        setPlaybackState('playing');
       }
     }
 
-    volumeSlider.oninput = () => {
-      volumeNode.gain.value = parseFloat(volumeSlider.value);
-    };
-
-    function setupWebSocket() {
-      ws = new WebSocket('wss://cc-void-city-radio-piueq.ondigitalocean.app/ws');
-      ws.binaryType = 'arraybuffer';
-      ws.onopen = () => updateStatus('Connected, streaming…');
-      ws.onmessage = evt => {
-        const compressed = new Uint8Array(evt.data);
-        const pcm = decoder.decode(compressed);
-        const buffer = audioCtx.createBuffer(1, pcm.length, SAMPLE_RATE);
-        buffer.copyToChannel(pcm, 0);
-        const src = audioCtx.createBufferSource();
-        src.buffer = buffer;
-        src.connect(volumeNode);
-        if (nextPlayTime < audioCtx.currentTime) {
-          nextPlayTime = audioCtx.currentTime + 0.01;
-        }
-        src.start(nextPlayTime);
-        nextPlayTime += buffer.duration;
-      };
-      ws.onerror = () => ws.close();
-      ws.onclose = () => {
-        if (!disconnectBtn.disabled) {
-          updateStatus('Connection lost, reconnecting…');
-          setTimeout(setupWebSocket, 1000);
-        }
-      };
+    function setPlaybackState(state) {
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState=state;
+      }
     }
 
-    connectBtn.onclick = startStreaming;
-    disconnectBtn.onclick = stopStreaming;
-    playpauseBtn.onclick = togglePlayPause;
+    volumeSlider.oninput=()=>{volumeNode.gain.value=parseFloat(volumeSlider.value);};
+
+    function setupWebSocket() {
+      ws=new WebSocket('wss://cc-void-city-radio-piueq.ondigitalocean.app/ws');
+      ws.binaryType='arraybuffer';
+      ws.onopen=()=>updateStatus('Connected, streaming…');
+      ws.onmessage=evt=>{
+        const compressed=new Uint8Array(evt.data);
+        const pcm=decoder.decode(compressed);
+        const buffer=audioCtx.createBuffer(1,pcm.length,SAMPLE_RATE);
+        buffer.copyToChannel(pcm,0);
+        const src=audioCtx.createBufferSource();
+        src.buffer=buffer;src.connect(volumeNode);
+        if(nextPlayTime<audioCtx.currentTime)nextPlayTime=audioCtx.currentTime+0.01;
+        src.start(nextPlayTime);nextPlayTime+=buffer.duration;
+      };
+      ws.onerror=()=>ws.close();
+      ws.onclose=()=>{if(!disconnectBtn.disabled){updateStatus('Connection lost, reconnecting…');setTimeout(setupWebSocket,1000);} };
+    }
+
+    connectBtn.onclick=startStreaming;
+    disconnectBtn.onclick=stopStreaming;
+    playpauseBtn.onclick=()=>togglePlayPause();
   </script>
 </body>
 </html>
