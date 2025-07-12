@@ -1,10 +1,10 @@
 const CACHE_NAME = 'dfpwm-player-v1';
 const ASSETS = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/icon-192.png',
-  '/icon-512.png',
+  './',
+  'index.html',
+  'manifest.json',
+  'icon-192.png',
+  'icon-512.png',
   // any other scripts/CSS you need
 ];
 

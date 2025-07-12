@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <title>DFPWM Stream Player</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="manifest" href="/manifest.json">
+  <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#000000">
   <!-- PWA manifest and service worker if needed -->
   <style>
@@ -75,7 +75,7 @@
 
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/service-worker.js')
+      navigator.serviceWorker.register('service-worker.js')
         .then(() => console.log('SW registered'))
         .catch(err => console.error('SW failed', err));
     }
